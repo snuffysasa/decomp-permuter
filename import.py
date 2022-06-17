@@ -659,7 +659,8 @@ def create_write_settings_toml(
     rand_weights = get_default_randomization_weights(compiler_type)
 
     with open(filename, "w", encoding="utf-8") as f:
-        f.write(f'func_name = "{func_name}"\n')
+        if func_name is not "":
+            f.write(f'func_name = "{func_name}"\n')
         f.write(f'compiler_type = "{compiler_type}"\n\n')
 
         f.write("# uncomment lines below to customize the weights\n")
@@ -761,7 +762,7 @@ def download_decompme(url_str: str) -> None:
 
         compiler_type = compiler_settings.get("compiler_type", "base")
 
-        create_write_settings_toml(func_name, compiler_type, settings_file)
+        create_write_settings_toml("", compiler_type, settings_file)
 
         print(
             f"Success!! Prepared new folder, {dirname}, that is ready for the permuter script! Run with 'python3 permuter.py {dirname} [additional_flags]'"
