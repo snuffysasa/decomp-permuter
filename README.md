@@ -45,6 +45,13 @@ Additionally, it is recommended to set the compiler type in the settings.toml fi
 You can override the set weight values for a specific function by setting the weights for each pass type individually in the settings.toml file in the input dir.
 When using import.py it will generate comment lines for customizing that functions weights as reference.
 
+## Using import.py with decomp.me
+import.py has an additional feature where it can prepare a directory for the permuter by downloading what it needs from a decomp.me scratch. 
+To use this feature all you must setup a TOML file, decompme_mappings.toml in the current working directory (root of this repository). This TOML file must contain a key that matches the decompme compiler identifier for each compiler you intend to use, and for each of those you must set the properties: PATH, EXE_NAME, and USE_WINE. (See example_decompme_mappings.toml)
+Then run: `python3 import.py https://decomp.me/scratch/AbC12`
+
+## Permutation macros
+
 The .c file may be modified with any of the following macros which affect manual permutation:
 
 - `PERM_GENERAL(a, b, ...)` expands to any of `a`, `b`, ...
