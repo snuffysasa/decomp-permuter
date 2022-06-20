@@ -21,8 +21,20 @@ from .helpers import (
     static_assert_unreachable,
     trim_source,
 )
-from .net.client import start_client
-from .net.core import ServerError, connect, enable_debug_mode, MAX_PRIO, MIN_PRIO
+
+import platform
+
+system = platform.system().lower()
+
+isWindowsPlatform: bool = "nt" in system or "msys" in system
+
+if not isWindowsPlatform:
+    from .net.client import start_client
+    from .net.core import ServerError, connect, enable_debug_mode, MAX_PRIO, MIN_PRIO
+else:
+    MAX_PRIO = 0.0
+    MIN_PRIO = 0.0
+
 from .permuter import (
     EvalError,
     EvalResult,
@@ -688,6 +700,12 @@ def main() -> None:
     threads = args.threads
     if not threads and not args.use_network:
         threads = 1
+
+    if args.use_network and isWindowsPlatform:
+        print(
+            "Error: Networking features are not supported on windows platform... exiting"
+        )
+        sys.exit(1)
 
     options = Options(
         directories=args.directories,
