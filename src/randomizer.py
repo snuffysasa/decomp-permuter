@@ -493,6 +493,25 @@ def get_insertion_points(
     return cands
 
 
+def get_noncolliding_name(ast: ca.FileAST, name: str) -> str:
+
+    used_names: Set[str] = set()
+
+    for item in ast.ext:
+        if isinstance(item, ca.Decl) and item.name:
+            used_names.add(item.name)
+        if isinstance(item, ca.FuncDef) and item.decl.name:
+            used_names.add(item.decl.name)
+
+    new_name = name
+    counter = 1
+    while new_name in used_names:
+        counter += 1
+        new_name = f"{new_name}{counter}"
+
+    return new_name
+
+
 def maybe_reuse_var(
     var: Optional[str],
     assign_before: ca.Node,
@@ -2080,6 +2099,96 @@ def perm_pad_var_decl(
     ast_util.insert_decl(fn, var, type, random)
 
 
+def perm_inline_get_structmember(
+    fn: ca.FuncDef, ast: ca.FileAST, indices: Indices, region: Region, random: Random
+) -> None:
+    """Creates an inline function for accessing a struct member."""
+
+    typemap = build_typemap(ast)
+
+    cands: List[ca.StructRef] = []
+
+    class Visitor(ca.NodeVisitor):
+        def visit_BinaryOp(self, node: ca.BinaryOp) -> None:
+            self.visit(node.right)
+
+        def visit_Assignment(self, node: ca.Assignment) -> None:
+            self.visit(node.rvalue)
+
+        def visit_StructRef(self, node: ca.StructRef) -> None:
+            if region.contains_node(node) and isinstance(node.name, ca.ID):
+                cands.append(node)
+            self.generic_visit(node)
+
+    Visitor().visit(fn.body)
+
+    ensure(cands)
+    cand = random.choice(cands)
+
+    parentOp: Optional[ca.UnaryOp] = ast_util.find_parent_address_op(fn.body, cand)
+
+    member_type: SimpleType = decayed_expr_type(cand, typemap)
+    member_name = cand.field.name
+
+    new_inline_fn_name = get_noncolliding_name(ast, f"get_{member_name}")
+
+    # Replace the StructRef with a FuncCall to the new inline yet to be created
+    replace_node(
+        fn.body,
+        cand if not parentOp else parentOp,
+        ca.FuncCall(ca.ID(new_inline_fn_name), ca.ExprList([cand.name])),
+    )
+
+    # Now create the new inline function definition
+    arg_type: SimpleType = decayed_expr_type(cand.name, typemap)
+    assert isinstance(arg_type.type, ca.TypeDecl)
+    assert arg_type.type.declname
+
+    theParam = ca.Decl(
+        name=None,
+        quals=[],
+        align=[],
+        storage=[],
+        funcspec=[],
+        type=arg_type,
+        init=None,
+        bitsize=None,
+    )
+
+    fn_decl = ca.Decl(
+        name=new_inline_fn_name,
+        quals=[],
+        align=[],
+        storage=[],
+        funcspec=["inline"],
+        type=ca.FuncDecl(
+            args=ca.ParamList([theParam]),
+            type=copy.deepcopy(member_type),
+        ),
+        init=None,
+        bitsize=None,
+    )
+
+    set_decl_name(fn_decl)
+
+    return_expr: Expression = ca.StructRef(
+        name=ca.ID(arg_type.type.declname),
+        type="->",
+        field=ca.ID(member_name),
+    )
+    if parentOp:
+        return_expr = ca.UnaryOp("&", return_expr)
+
+    fn_def = ca.FuncDef(
+        decl=fn_decl,
+        param_decls=[],
+        body=ca.Compound(block_items=[ca.Return(return_expr)]),
+    )
+
+    # Insert the new inline just above the main function
+    ast.ext.insert(ast.ext.index(fn), fn_def)
+
+
 RandomizationPass = Callable[[ca.FuncDef, ca.FileAST, Indices, Region, Random], None]
 
 RANDOMIZATION_PASSES: List[RandomizationPass] = [
@@ -2112,6 +2221,7 @@ RANDOMIZATION_PASSES: List[RandomizationPass] = [
     perm_chain_assignment,
     perm_long_chain_assignment,
     perm_pad_var_decl,
+    perm_inline_get_structmember,
 ]
 
 
@@ -2135,15 +2245,15 @@ class Randomizer:
             for method in RANDOMIZATION_PASSES
         ]
 
-    def randomize(self, ast: ca.FileAST, fn_index: int) -> None:
-        fn = ast.ext[fn_index]
-        assert isinstance(fn, ca.FuncDef)
+    def randomize(self, ast: ca.FileAST, fn_name: str) -> None:
+        fn = ast_util.extract_fn(ast, fn_name)[0]
         indices = ast_util.compute_node_indices(fn)
         region = get_randomization_region(fn, indices, self.random)
         while True:
             method = random_weighted(self.random, self.methods)
             try:
                 method(fn, ast, indices, region, self.random)
+
                 break
             except RandomizationFailure:
                 pass
