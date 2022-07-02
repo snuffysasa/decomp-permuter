@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import difflib
+import hashlib
 import itertools
 import random
 import re
@@ -13,6 +14,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    Set,
 )
 
 from .candidate import Candidate, CandidateResult
@@ -30,6 +32,7 @@ from .helpers import find_fns, trim_source
 class EvalError:
     exc_str: Optional[str]
     seed: Optional[Tuple[int, int]]
+    duplicate: bool
 
 
 EvalResult = Union[CandidateResult, EvalError]
@@ -50,6 +53,10 @@ class NeedMoreWork:
 
 
 class _CompileFailure(Exception):
+    pass
+
+
+class _DuplicateRandomization(Exception):
     pass
 
 
@@ -135,6 +142,7 @@ class Permuter:
         self.hashes = {self.base_hash}
         self._cur_cand: Optional[Candidate] = None
         self._last_score: Optional[int] = None
+        self._source_cache: Set[str] = set()
 
     def _create_and_score_base(self) -> Tuple[int, str, str]:
         base_source, eval_state = perm_evaluate_one(self._permutations)
@@ -196,7 +204,12 @@ class Permuter:
 
         t1 = time.time()
 
-        self._cur_cand.get_source()
+        cand_source = self._cur_cand.get_source()
+        hash = hashlib.sha256(cand_source.encode()).hexdigest()
+        if hash in self._source_cache:
+            raise _DuplicateRandomization()
+        else:
+            self._source_cache.add(hash)
 
         t2 = time.time()
 
@@ -265,10 +278,18 @@ class Permuter:
         """Evaluate a seed for the permuter."""
         try:
             return self._eval_candidate(seed)
+        except _DuplicateRandomization:
+            return EvalError(
+                exc_str="Duplicate Source from Randomization - not scoring",
+                seed=self._cur_seed,
+                duplicate=True,
+            )
         except _CompileFailure:
-            return EvalError(exc_str=None, seed=self._cur_seed)
+            return EvalError(exc_str=None, seed=self._cur_seed, duplicate=False)
         except Exception:
-            return EvalError(exc_str=traceback.format_exc(), seed=self._cur_seed)
+            return EvalError(
+                exc_str=traceback.format_exc(), seed=self._cur_seed, duplicate=False
+            )
 
     def diff(self, other_source: str) -> str:
         """Compute a unified white-space-ignoring diff from the (pretty-printed)
