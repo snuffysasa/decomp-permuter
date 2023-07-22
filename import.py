@@ -25,6 +25,7 @@ from src.error import CandidateConstructionFailure
 from src.helpers import get_default_randomization_weights, find_fns
 
 is_macos = platform.system() == "Darwin"
+is_wsl = 'microsoft-standard' in platform.uname().release
 
 DECOMPME_API_BASE: str = os.environ.get("DECOMPME_API_BASE", "https://decomp.me")
 DECOMPME_BASE: str = os.environ.get("DECOMPME_BASE", "https://decomp.me")
@@ -763,7 +764,7 @@ def download_decompme(url_str: str) -> None:
 
         if compiler_id not in all_settings:
             print(
-                f"Compiler {compiler_id} not found in decompme_compiler_mappings.toml"
+                f"Compiler {compiler_id} not found in decompme_mappings.toml"
             )
             print(
                 f"Add a new entry to this toml file, for this compiler: {compiler_id}"
@@ -777,9 +778,10 @@ def download_decompme(url_str: str) -> None:
             f.write(f"cd {compiler_settings['PATH']}\n")
 
             compile_line = "wine " if compiler_settings["USE_WINE"] else ""
+            compile_line += "./" if is_wsl else ""
             compile_line += compiler_settings["EXE_NAME"] + " "
             compile_line += response_json["compiler_flags"]
-            compile_line += " -c -o $3 $1"
+            compile_line += " -c -o $(wslpath -w $3) $(wslpath -w $1)" if is_wsl else " -c -o $3 $1"
             f.write(compile_line)
 
         os.chmod(compile_script, os.stat(compile_script).st_mode | stat.S_IEXEC)
